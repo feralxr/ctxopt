@@ -240,7 +240,7 @@ PyPI's side, under **Your project → Publishing → Add a new pending publisher
 | PyPI Project Name | `ctxopt` |
 | Owner | `feralxr` |
 | Repository name | `ctxopt` |
-| Workflow name | `publish.yml` |
+| Workflow name | `workflow.yml` |
 | Environment name | `pypi` |
 
 After that's linked, cutting a release is just:
@@ -251,7 +251,7 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-[`.github/workflows/publish.yml`](.github/workflows/publish.yml) builds the
+[`.github/workflows/workflow.yml`](.github/workflows/workflow.yml) builds the
 sdist/wheel, checks the tag matches `pyproject.toml`'s version, and publishes.
 
 ## License
