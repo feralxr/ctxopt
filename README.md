@@ -226,6 +226,34 @@ pip install -e ".[dev]"
 pytest
 ```
 
+Every push/PR to `main` runs the test suite across Python 3.9–3.12 via
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml).
+
+## Publishing
+
+Releases are published to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+(OIDC) — no PyPI API token is ever stored as a secret. One-time setup on
+PyPI's side, under **Your project → Publishing → Add a new pending publisher**:
+
+| Field | Value |
+|---|---|
+| PyPI Project Name | `ctxopt` |
+| Owner | `feralxr` |
+| Repository name | `ctxopt` |
+| Workflow name | `publish.yml` |
+| Environment name | `pypi` |
+
+After that's linked, cutting a release is just:
+
+```bash
+# bump the version in pyproject.toml and src/ctxopt/__init__.py first
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml) builds the
+sdist/wheel, checks the tag matches `pyproject.toml`'s version, and publishes.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
