@@ -38,14 +38,27 @@ def _read_input(file: Optional[Path]) -> str:
 @app.command()
 def sandbox(
     file: Optional[Path] = typer.Argument(None, exists=True, help="File to read. Omit to read stdin."),
-    max_lines: int = typer.Option(200, help="Collapse output once it exceeds this many lines."),
-    head: int = typer.Option(40, help="Lines to keep from the start."),
-    tail: int = typer.Option(40, help="Lines to keep from the end."),
+    max_tokens: Optional[int] = typer.Option(
+        None, "--max-tokens", help="Shrink output to fit this token budget (recommended over --max-lines)."
+    ),
+    max_lines: int = typer.Option(200, help="Collapse output once it exceeds this many lines (ignored if --max-tokens is set)."),
+    head: Optional[int] = typer.Option(None, help="Lines to keep from the start. Defaults to a profile-specific value."),
+    tail: Optional[int] = typer.Option(None, help="Lines to keep from the end. Defaults to a profile-specific value."),
+    profile: str = typer.Option("auto", help="Content profile: auto, generic, json, stacktrace, or diff."),
+    keep: list[str] = typer.Option([], "--keep", help="Extra regex pattern to always preserve (repeatable)."),
     out: Optional[Path] = typer.Option(None, help="Write result to this file instead of stdout."),
 ) -> None:
     """Collapse noisy or oversized tool output into a compact form."""
     text = _read_input(file)
-    result = sandbox_text(text, max_lines=max_lines, head_lines=head, tail_lines=tail)
+    result = sandbox_text(
+        text,
+        max_tokens=max_tokens,
+        max_lines=max_lines,
+        head_lines=head,
+        tail_lines=tail,
+        keep_patterns=list(keep) or None,
+        profile=profile,
+    )
 
     if out:
         out.write_text(result.text, encoding="utf-8")
@@ -53,9 +66,10 @@ def sandbox(
         console.print(result.text)
 
     saved = result.original_tokens - result.final_tokens
+    budget_note = ", fit to budget" if result.fit_to_budget else ""
     err_console.print(
-        f"[dim]{result.original_tokens} -> {result.final_tokens} tokens "
-        f"({saved} saved, {result.lines_elided} lines elided)[/dim]"
+        f"[dim]profile={result.profile}  {result.original_tokens} -> {result.final_tokens} tokens "
+        f"({saved} saved, {result.lines_elided} lines elided{budget_note})[/dim]"
     )
 
 

@@ -5,8 +5,9 @@
 `ctxopt` helps you keep conversations with LLMs — and the agents built on
 them — lean. It does three things, each independently useful:
 
-- 🧹 **Sandbox** noisy tool output (logs, stack traces, command results) down
-  to a compact form instead of dumping thousands of lines into your context.
+- 🧹 **Sandbox** noisy tool output (logs, stack traces, diffs, JSON blobs) down
+  to a compact form that fits an actual token budget, instead of dumping
+  thousands of lines into your context.
 - 📝 **Summarize** long conversations or transcripts into a shorter digest,
   locally and deterministically — no API calls required.
 - 🧭 **Route** a prompt to the right model tier based on an estimate of how
@@ -36,8 +37,8 @@ Requires Python 3.9+.
 
 ### Sandbox noisy output
 
-Collapse long or repetitive tool/log output, keeping the head and tail
-intact and eliding the noisy middle:
+This is the core command: it collapses long, repetitive, or oversized tool
+output while preserving the signal that actually matters.
 
 ```bash
 ctxopt sandbox build.log
@@ -45,29 +46,89 @@ ctxopt sandbox build.log
 cat build.log | ctxopt sandbox
 ```
 
-```
-$ npm install
-added package-0
-added package-1
-added package-2
-added package-3
-... [295 lines elided] ...
-added package-299
-added 842 packages in 12s
-npm WARN deprecated some-package@1.0.0
-... [line repeated 598 more times] ...
-Build succeeded in 4.2s
+**Token-budget fitting** (recommended — tokens, not lines, are what fill a
+context window):
 
-4016 -> 50 tokens (3966 saved, 295 lines elided)
+```bash
+ctxopt sandbox giant_stacktrace.log --max-tokens 300
+```
+
+```
+  File "app.py", line 14, in recurse
+    return recurse(n-1)
+RecursionError: maximum recursion depth exceeded
+profile=stacktrace  5346 -> 118 tokens (5228 saved, 981 lines elided, fit to budget)
+```
+
+**Near-duplicate collapsing.** Lines that are identical after stripping
+volatile bits (timestamps, hex addresses, UUIDs, standalone counters) get
+folded together — this is what actually tames recursive stack traces and
+progress spam, where only a counter or timestamp changes line to line.
+Digits embedded *inside* an identifier (like `line1` or `v2`) are left
+alone, so distinct content never silently merges:
+
+```bash
+ctxopt sandbox big_diff.patch
+```
+
+```
+diff --git a/big_module.py b/big_module.py
+--- a/big_module.py
++++ b/big_module.py
+@@ -1,300 +1,300 @@
++added line 0
+... [299 near-identical line(s) collapsed] ...
+profile=diff  1216 -> 28 tokens (1188 saved, 0 lines elided)
+```
+
+**Content profiles.** `ctxopt sandbox` auto-detects the shape of the input
+(`--profile auto` by default) and adjusts behavior accordingly:
+
+| Profile | Detected when | Behavior |
+|---|---|---|
+| `generic` | default fallback | Head/tail elision + near-dup collapsing |
+| `json` | input parses as JSON | Structural truncation: long strings and large arrays are trimmed *at the value level*, so the output stays valid JSON |
+| `stacktrace` | 3+ frame-like lines (`File "...", line N` / `at foo(...)`) | Tighter head window, `Traceback`/`Caused by` lines always preserved |
+| `diff` | 2+ diff markers (`+++`, `---`, `@@`, `diff --git`) | File headers and hunk markers always preserved even when the body is elided |
+
+JSON example — a 300-user payload with 800-character bios collapses to a
+fraction of its size while staying parseable:
+
+```bash
+ctxopt sandbox users.json
+```
+
+```json
+{
+  "users": [
+    { "id": 0, "name": "user_0", "bio": "xxxx...xx... [300 chars truncated]" },
+    ...
+  ]
+}
+```
+```
+profile=json  2401 -> 306 tokens (2095 saved, 0 lines elided)
+```
+
+**Signal preservation.** Lines matching `error`, `exception`, `fail(ed/ure)`,
+`traceback`, `fatal`, or `panic` are never elided, even inside the collapsed
+middle — up to a cap (`max_kept_matches` as a library param) so a
+pathological log full of "error" lines can't defeat the budget. Add your own
+patterns with `--keep`:
+
+```bash
+ctxopt sandbox app.log --keep "payment_id=\w+" --max-tokens 500
 ```
 
 Flags:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--max-lines` | 200 | Collapse once output exceeds this many lines |
-| `--head` | 40 | Lines to keep from the start |
-| `--tail` | 40 | Lines to keep from the end |
+| `--max-tokens` | — | Shrink output to fit this token budget (shrinks head/tail/keep windows until it fits) |
+| `--max-lines` | 200 | Collapse once output exceeds this many lines (used when `--max-tokens` isn't set) |
+| `--head` / `--tail` | profile-specific | Lines to keep from the start/end |
+| `--profile` | `auto` | `auto`, `generic`, `json`, `stacktrace`, or `diff` |
+| `--keep` | — | Extra regex to always preserve (repeatable) |
 | `--out` | stdout | Write result to a file instead |
 
 ### Summarize a conversation
@@ -126,9 +187,13 @@ Every command is backed by a plain Python function with no CLI coupling:
 ```python
 from ctxopt import sandbox_text, summarize_text, route, RouterConfig
 
-# Collapse noisy output
-result = sandbox_text(log_text, max_lines=200)
-print(result.text, result.original_tokens, result.final_tokens)
+# Collapse noisy output to fit an actual token budget
+result = sandbox_text(log_text, max_tokens=500)
+print(result.profile, result.text, result.original_tokens, result.final_tokens)
+
+# Always preserve your own markers (e.g. a request/trace id), on top of the
+# built-in error/exception/fail defaults
+result = sandbox_text(log_text, max_tokens=500, keep_patterns=[r"trace_id=\w+"])
 
 # Summarize a transcript
 digest = summarize_text(transcript_text, target_ratio=0.25)
