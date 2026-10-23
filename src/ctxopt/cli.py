@@ -76,19 +76,45 @@ def sandbox(
 @app.command()
 def summarize(
     file: Optional[Path] = typer.Argument(None, exists=True, help="File to read. Omit to read stdin."),
-    ratio: float = typer.Option(0.25, help="Target size as a fraction of the original."),
+    ratio: float = typer.Option(0.25, help="Target size as a fraction of the original (ignored if --max-tokens is set)."),
+    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="Target size in tokens directly."),
+    keep: list[str] = typer.Option([], "--keep", help="Extra regex pattern to always preserve (repeatable)."),
+    keep_last: int = typer.Option(2, "--keep-last", help="Always keep this many of the most recent turns (conversations only)."),
+    llm: bool = typer.Option(False, "--llm", help="Use an LLM for abstractive summarization instead of the local heuristic."),
+    model: str = typer.Option("claude-haiku-5-5", help="Model to use with --llm."),
     out: Optional[Path] = typer.Option(None, help="Write result to this file instead of stdout."),
 ) -> None:
     """Condense a long conversation or log into a shorter digest."""
     text = _read_input(file)
-    result = summarize_text(text, target_ratio=ratio)
+
+    llm_call = None
+    if llm:
+        from .llm import anthropic_backend
+
+        llm_call = anthropic_backend(model=model)
+
+    try:
+        result = summarize_text(
+            text,
+            target_ratio=ratio,
+            max_tokens=max_tokens,
+            keep_patterns=list(keep) or None,
+            keep_last_n_turns=keep_last,
+            llm_call=llm_call,
+        )
+    except RuntimeError as exc:
+        err_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
 
     if out:
         out.write_text(result.text, encoding="utf-8")
     else:
         console.print(result.text)
 
-    err_console.print(f"[dim]{result.original_tokens} -> {result.final_tokens} tokens[/dim]")
+    turns_note = f"  turns {result.turns_kept}/{result.turns_total}" if result.turns_total is not None else ""
+    err_console.print(
+        f"[dim]backend={result.backend}  {result.original_tokens} -> {result.final_tokens} tokens{turns_note}[/dim]"
+    )
 
 
 @app.command(name="route")

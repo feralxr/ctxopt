@@ -133,22 +133,79 @@ Flags:
 
 ### Summarize a conversation
 
-Condense a long transcript or log into a shorter digest using a fast,
-transparent extractive heuristic (paragraph length, keyword density, and
-position all factor into what gets kept):
+This is conversation-*aware*, not just a document shortener. It detects two
+transcript formats — `Role: message` plain text, and JSON message lists
+(`[{"role": ..., "content": ...}]`, the shape most chat APIs use) — and
+summarizes turn by turn. Anything else falls back to paragraph-based
+segmentation.
 
 ```bash
-ctxopt summarize transcript.txt --ratio 0.2
+ctxopt summarize support_thread.txt --max-tokens 120
 ```
 
+A 47-turn transcript — a real bug report, 39 repetitive "any update?"
+check-ins, and a resolution — collapses to the parts that matter:
+
 ```
-638 -> 126 tokens
+User: Hey, the deploy script is failing on staging.
+
+Assistant: Can you share the error output?
+
+User: Sure, here it is: ValueError: missing config key DATABASE_URL
+
+Assistant: Looks like the staging .env file is missing that key. I will check.
+
+Assistant: still looking into it, item 10 is in progress.
+
+Assistant: Found it, the key was renamed in the last config migration. We
+decided to add a fallback default for it.
+
+User: Perfect, that fixed it. Thanks!
+
+Assistant: Glad it works now. Let me know if anything else comes up.
+
+backend=local  640 -> 120 tokens  turns 8/47
 ```
 
-This is intentionally local and deterministic rather than LLM-backed, so it
-costs nothing and behaves predictably. If you want an abstractive summary,
-pipe the condensed output into your own LLM call — you'll be sending it far
-fewer tokens than the original.
+The problem report, the diagnosis, the decision, and the resolution all
+survived; the 39 near-identical "checking in" turns didn't.
+
+**How segments are chosen**, same philosophy as `sandbox`'s keep patterns:
+
+- Lines matching `error`, `exception`, `decided`, or `important` are always
+  kept, plus any `--keep <regex>` you add, however small the budget.
+- The most recent `--keep-last` turns (default 2) are always kept — only
+  meaningful for conversations, ignored for plain documents.
+- Everything else is scored by length, keyword density, and position, then
+  greedily added until the budget is met — skipping any candidate that's a
+  near-duplicate (word-overlap above `redundancy_threshold`) of something
+  already kept, so repetitive check-ins don't all survive just because each
+  one scores decently on its own.
+
+This local mode is fully offline and deterministic — no network calls, no
+cost, same input always gives the same output.
+
+**Abstractive summaries (optional).** Pass `--llm` to use a real model
+instead of the local heuristic. It reads `ANTHROPIC_API_KEY` from your
+environment and does a small map-reduce: segments are grouped into
+token-sized chunks, each chunk gets summarized by the model, and — only if
+the combined chunk summaries still exceed the target — one final call
+reduces them into a single digest.
+
+```bash
+export ANTHROPIC_API_KEY=sk-...
+ctxopt summarize huge_transcript.txt --llm --max-tokens 300
+```
+
+As a library, `llm_call` is just `Callable[[str], str]` — point it at
+anything, not just Anthropic:
+
+```python
+from ctxopt import summarize_text, anthropic_backend
+
+result = summarize_text(transcript, llm_call=anthropic_backend(), max_tokens=300)
+print(result.backend, result.text)  # "llm", "..."
+```
 
 ### Route a prompt to a model tier
 
@@ -195,8 +252,9 @@ print(result.profile, result.text, result.original_tokens, result.final_tokens)
 # built-in error/exception/fail defaults
 result = sandbox_text(log_text, max_tokens=500, keep_patterns=[r"trace_id=\w+"])
 
-# Summarize a transcript
-digest = summarize_text(transcript_text, target_ratio=0.25)
+# Summarize a transcript (conversation-aware, local and free)
+digest = summarize_text(transcript_text, max_tokens=300, keep_last_n_turns=3)
+print(digest.turns_kept, "of", digest.turns_total, "turns kept")
 
 # Route to a model tier, with your own model names
 config = RouterConfig(tiers={
