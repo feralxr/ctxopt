@@ -120,14 +120,22 @@ def summarize(
 @app.command(name="route")
 def route_command(
     prompt: str = typer.Argument(..., help="The prompt to score and route."),
+    history_tokens: int = typer.Option(0, "--history-tokens", help="Accumulated conversation size so far, if any."),
+    output_tokens: int = typer.Option(500, "--output-tokens", help="Estimated response length, for cost estimation."),
+    max_cost: Optional[float] = typer.Option(None, "--max-cost", help="Budget in USD; downgrades tier if the chosen tier exceeds it."),
 ) -> None:
     """Score a prompt's complexity and recommend a model tier."""
-    decision = route_prompt(prompt, RouterConfig())
+    config = RouterConfig(max_cost_per_call=max_cost)
+    decision = route_prompt(prompt, config, history_tokens=history_tokens, estimated_output_tokens=output_tokens)
 
     table = Table(show_header=False, box=None)
     table.add_row("Score", f"{decision.score:.2f}")
     table.add_row("Tier", decision.tier)
     table.add_row("Model", decision.model)
+    if decision.estimated_cost_usd is not None:
+        table.add_row("Est. cost", f"${decision.estimated_cost_usd:.5f}")
+    if decision.estimated_latency_ms is not None:
+        table.add_row("Est. latency", f"{decision.estimated_latency_ms:.0f} ms")
     table.add_row("Reasons", "; ".join(decision.reasons) or "none")
     console.print(table)
 

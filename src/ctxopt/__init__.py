@@ -2,12 +2,22 @@
 
 from .conversation import Turn, parse_conversation
 from .llm import anthropic_backend
-from .router import RouteDecision, RouterConfig, route, score_prompt
+from .router import (
+    RouteDecision,
+    RouterConfig,
+    RoutingLog,
+    ScoringWeights,
+    TierEconomics,
+    escalate,
+    looks_like_refusal_or_shallow,
+    route,
+    score_prompt,
+)
 from .sandbox import SandboxResult, detect_profile, sandbox_text
 from .summarize import SummaryResult, summarize_text
 from .tokens import count_tokens
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "count_tokens",
@@ -23,5 +33,10 @@ __all__ = [
     "score_prompt",
     "RouteDecision",
     "RouterConfig",
+    "ScoringWeights",
+    "TierEconomics",
+    "RoutingLog",
+    "escalate",
+    "looks_like_refusal_or_shallow",
     "__version__",
 ]

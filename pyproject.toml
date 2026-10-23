@@ -1,6 +1,6 @@
 [project]
 name = "ctxopt"
-version = "0.3.0"
+version = "0.4.0"
 description = "A lightweight CLI for taming LLM context windows: sandbox noisy tool output, summarize long conversations, and route prompts to the right model tier."
 readme = "README.md"
 requires-python = ">=3.9"

@@ -209,17 +209,20 @@ print(result.backend, result.text)  # "llm", "..."
 
 ### Route a prompt to a model tier
 
-Score a prompt's complexity and get a model recommendation back:
+Score a prompt's complexity and get a model recommendation, with cost and
+latency estimates:
 
 ```bash
 ctxopt route "What is the capital of France?"
 ```
 
 ```
-Score    0.00
-Tier     simple
-Model    claude-haiku-5-5
-Reasons  2 simple-query keyword(s) matched
+Score         0.00
+Tier          simple
+Model         claude-haiku-5-5
+Est. cost     $0.00201
+Est. latency  400 ms
+Reasons       2 simple-query keyword(s) matched
 ```
 
 ```bash
@@ -227,15 +230,80 @@ ctxopt route "Design a fault-tolerant distributed architecture for this payment 
 ```
 
 ```
-Score    0.74
-Tier     complex
-Model    claude-opus-5-5
-Reasons  contains code or code-like syntax; 4 complexity keyword(s) matched
+Score         0.76
+Tier          complex
+Model         claude-opus-5-5
+Est. cost     $0.03789
+Est. latency  3000 ms
+Reasons       contains code or code-like syntax; 4 complexity keyword(s) matched
 ```
 
-The scoring heuristic weighs input length, presence of code, and
-complexity/simplicity keyword signals. Tiers and model names are fully
-configurable — see below.
+**Keyword density, not raw count.** Complexity keyword matches are scored
+per 100 tokens, not as a flat count — so a short, keyword-dense request
+scores clearly complex, while the same keywords diluted across a long,
+mostly-filler prompt don't:
+
+```python
+from ctxopt import score_prompt
+
+score_prompt("Debug this algorithm and analyze the security architecture trade-offs.")
+# -> (0.55, ['6 complexity keyword(s) matched'])
+
+score_prompt("Debug this algorithm and analyze the security architecture "
+             "trade-offs. " + "filler content that adds length. " * 60)
+# -> (0.27, ['long input (~412 tokens)', '6 complexity keyword(s) matched'])
+# same keywords, far lower density -> lower score despite the length bonus
+```
+
+**Conversation history matters too.** A short message late in a long
+session often still needs a capable model to stay coherent — pass
+`--history-tokens` (or `history_tokens=` as a library) to factor that in:
+
+```bash
+ctxopt route "Can you also check that last part?" --history-tokens 6000
+```
+
+**Cost-aware routing.** Every tier can carry cost/latency economics; set a
+budget and the router downgrades to a tier that fits it, noting why:
+
+```bash
+ctxopt route "Design a fault-tolerant distributed payment architecture..." --max-cost 0.0005
+```
+
+```
+Reasons  9 complexity keyword(s) matched; budget too low for any tier;
+         using cheapest available ('simple')
+```
+
+**Escalation.** A one-shot router can't know if its pick actually worked —
+`looks_like_refusal_or_shallow` is a cheap heuristic for "this response
+dodged the question or phoned it in", and `escalate` bumps a decision up a
+tier so you can retry:
+
+```python
+from ctxopt import route, escalate, looks_like_refusal_or_shallow
+
+decision = route(prompt)
+response = call_model(decision.model, prompt)  # your own call
+if looks_like_refusal_or_shallow(response):
+    decision = escalate(decision)
+    response = call_model(decision.model, prompt)
+```
+
+**Audit trail.** `RoutingLog` appends routing decisions to a JSONL file
+(prompt hash by default, not the prompt text) and summarizes tier
+distribution and average cost over time:
+
+```python
+from ctxopt import RoutingLog
+
+log = RoutingLog("routing.jsonl")
+log.record(prompt, decision)
+log.summary()  # {"total": 142, "tier_counts": {...}, "avg_cost_usd": ...}
+```
+
+Tiers, model names, score thresholds, keyword lists, and per-tier economics
+are all configurable via `RouterConfig` — see below.
 
 ## Using it as a library
 
@@ -256,14 +324,13 @@ result = sandbox_text(log_text, max_tokens=500, keep_patterns=[r"trace_id=\w+"])
 digest = summarize_text(transcript_text, max_tokens=300, keep_last_n_turns=3)
 print(digest.turns_kept, "of", digest.turns_total, "turns kept")
 
-# Route to a model tier, with your own model names
-config = RouterConfig(tiers={
-    "simple": "gpt-4o-mini",
-    "standard": "gpt-4o",
-    "complex": "o1",
-})
-decision = route(user_prompt, config)
-print(decision.tier, decision.model, decision.reasons)
+# Route to a model tier, with your own model names and a cost budget
+config = RouterConfig(
+    tiers={"simple": "gpt-4o-mini", "standard": "gpt-4o", "complex": "o1"},
+    max_cost_per_call=0.05,
+)
+decision = route(user_prompt, config, history_tokens=conversation_size)
+print(decision.tier, decision.model, decision.estimated_cost_usd, decision.reasons)
 ```
 
 ## Why this exists
