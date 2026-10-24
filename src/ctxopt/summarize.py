@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .conversation import parse_conversation
+from .safety import compile_safe_pattern
 from .tokens import count_tokens
 
 _SCORE_KEYWORDS = (
@@ -85,7 +86,7 @@ def _render_segment(seg: _Segment) -> str:
 
 
 def _word_set(text: str) -> set[str]:
-    return set(m.group(0).lower() for m in _WORD_RE.finditer(text))
+    return {m.group(0).lower() for m in _WORD_RE.finditer(text)}
 
 
 def _similarity(a: str, b: str) -> float:
@@ -242,8 +243,10 @@ def summarize_text(
     if llm_call is not None:
         return _llm_reduce(segments, is_conversation, target_tokens, llm_call, llm_chunk_tokens, original_tokens)
 
-    all_patterns = list(_DEFAULT_KEEP_PATTERNS) + list(keep_patterns or [])
-    keep_regexes = [re.compile(p, re.IGNORECASE) for p in all_patterns]
+    # As in sandbox.py: our own default patterns are trusted and compiled
+    # directly; user-supplied keep_patterns go through the ReDoS guard.
+    keep_regexes = [re.compile(p, re.IGNORECASE) for p in _DEFAULT_KEEP_PATTERNS]
+    keep_regexes += [compile_safe_pattern(p, flags=re.IGNORECASE) for p in (keep_patterns or [])]
     effective_keep_last = keep_last_n_turns if is_conversation else 0
 
     kept = _extractive_reduce(segments, target_tokens, keep_regexes, effective_keep_last, redundancy_threshold)

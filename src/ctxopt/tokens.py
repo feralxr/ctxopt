@@ -1,12 +1,15 @@
 """Token counting utilities."""
 from __future__ import annotations
 
+from typing import Any, Optional
+
+_ENCODING: Optional[Any] = None
 try:
     import tiktoken
 
     _ENCODING = tiktoken.get_encoding("cl100k_base")
 except Exception:  # pragma: no cover - tiktoken is optional at runtime
-    _ENCODING = None
+    pass
 
 
 def count_tokens(text: str) -> int:

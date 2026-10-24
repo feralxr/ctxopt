@@ -33,9 +33,29 @@ tests/              - one test file per module above
 
 ## Continuous integration
 
-Every push and pull request to `main` runs the full test suite across
-Python 3.9–3.12 via [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
-A PR shouldn't be merged with a red check.
+Every push and pull request to `main` runs, via
+[`.github/workflows/tests.yml`](.github/workflows/tests.yml):
+
+- **lint**: `ruff check src/ tests/` and `mypy`, on Python 3.12.
+- **test**: the full pytest suite across Python 3.9–3.12.
+
+A PR shouldn't be merged with a red check. To run the same checks locally
+before pushing:
+
+```bash
+ruff check src/ tests/
+mypy
+pytest -q
+```
+
+One deliberate config note: `pyproject.toml` sets `target-version = "py39"`
+for ruff and ignores rule `UP045` (which would otherwise suggest `X | None`
+instead of `Optional[X]`). `cli.py` relies on Typer resolving parameter
+annotations at runtime via `typing.get_type_hints()`, and `X | None` as a
+runtime-evaluated expression requires Python 3.10+ (PEP 604) — applying
+that "fix" would silently break the CLI on Python 3.9, which this project
+still supports. Don't re-enable that rule without first confirming the
+package has dropped 3.9 support.
 
 ## Versioning
 

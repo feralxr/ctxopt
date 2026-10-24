@@ -70,9 +70,8 @@ def test_http_error_is_wrapped_in_runtime_error():
         fp=io.BytesIO(b'{"error": "invalid api key"}'),
     )
 
-    with patch("urllib.request.urlopen", side_effect=http_error):
-        with pytest.raises(RuntimeError, match="401"):
-            backend("text")
+    with patch("urllib.request.urlopen", side_effect=http_error), pytest.raises(RuntimeError, match="401"):
+        backend("text")
 
 
 def test_multiple_text_blocks_are_concatenated():

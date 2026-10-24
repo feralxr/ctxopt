@@ -3,7 +3,6 @@ import json
 from ctxopt.router import (
     RouterConfig,
     RoutingLog,
-    TierEconomics,
     escalate,
     looks_like_refusal_or_shallow,
     route,
@@ -132,7 +131,10 @@ def test_looks_like_refusal_detects_short_answers():
 
 
 def test_looks_like_refusal_false_for_substantive_answer():
-    answer = "Recursion is when a function calls itself, breaking a problem into smaller subproblems until a base case is reached."
+    answer = (
+        "Recursion is when a function calls itself, breaking a problem into "
+        "smaller subproblems until a base case is reached."
+    )
     assert not looks_like_refusal_or_shallow(answer)
 
 

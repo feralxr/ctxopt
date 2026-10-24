@@ -169,6 +169,28 @@ patterns with `--keep`:
 ctxopt sandbox app.log --keep "payment_id=\w+" --max-tokens 500
 ```
 
+### Guardrails on user-supplied patterns
+
+`--keep` patterns (here and in `summarize`) run through a ReDoS
+(regex-denial-of-service) guard before they're used: a pattern like
+`(a+)+$` matched against a crafted input can take catastrophically long in
+Python's regex engine. The guard rejects the common nested-quantifier shape
+outright, and separately smoke-tests every pattern against a short
+adversarial probe string with a hard timeout before it's ever run on real
+data — both checks apply only to patterns you supply; ctxopt's own built-in
+defaults are trusted and skip them.
+
+```bash
+ctxopt sandbox app.log --keep '(a|a)*b'
+```
+
+```
+Pattern '(a|a)*b' took too long matching a short test string and was rejected as
+a likely catastrophic-backtracking risk.
+```
+
+This is a heuristic, not a proof — see Known limitations below.
+
 ### Flags
 
 | Flag | Default | Description |
@@ -179,6 +201,7 @@ ctxopt sandbox app.log --keep "payment_id=\w+" --max-tokens 500
 | `--profile` | `auto` | `auto`, `generic`, `json`, `stacktrace`, or `diff` |
 | `--keep` | — | Extra regex pattern to always preserve (repeatable) |
 | `--out` | stdout | Write result to a file instead |
+| `--max-input-bytes` | 20 MB | Read at most this many bytes from a huge file/stdin (head+tail) instead of loading it all — see Known limitations |
 
 ## Summarize a conversation
 
@@ -285,6 +308,7 @@ print(result.backend, result.text)  # "llm", "..."
 | `--llm` | off | Use an LLM for abstractive summarization instead of the local heuristic |
 | `--model` | `claude-haiku-5-5` | Model to use with `--llm` |
 | `--out` | stdout | Write result to a file instead |
+| `--max-input-bytes` | 20 MB | Read at most this many bytes from a huge file/stdin (head+tail) instead of loading it all |
 
 ## Route a prompt to a model tier
 
@@ -470,6 +494,13 @@ A few choices that apply across all three modules, on purpose:
   backend (`ctxopt.llm.anthropic_backend`) is built on `urllib` from the
   standard library specifically so that using it doesn't pull in an extra
   package, and *not* using it costs nothing at all.
+- **Untrusted input gets guardrails, not just features.** User-supplied
+  regex (`--keep` in `sandbox` and `summarize`) is screened for
+  catastrophic-backtracking risk before it's run, and both CLI commands
+  read huge files/stdin through a bounded head+tail path rather than
+  loading everything into memory unconditionally. These exist because a
+  CLI that works great on curated examples but falls over or hangs on
+  adversarial or merely huge real-world input isn't actually done.
 
 ## Known limitations
 
@@ -500,6 +531,21 @@ Documented honestly rather than left for you to discover:
   output — this is meant for sandboxing output you're about to discard
   anyway (feeding a model, logging), not as a reversible compression
   format.
+- **The ReDoS guard is a heuristic, not a proof of safety.** The
+  nested-quantifier check and the smoke-test timeout catch the common
+  catastrophic-backtracking shapes, but a sufficiently creative pattern
+  could in principle pass both and still be slow on some input the smoke
+  test didn't happen to probe. It meaningfully raises the bar; it doesn't
+  make arbitrary user-supplied regex provably safe.
+- **Bounded large-file reads see a head and a tail, not the whole file.**
+  When a file exceeds `--max-input-bytes` (default 20 MB), `sandbox` and
+  `summarize` read only a head and tail slice of it — a keep-pattern match
+  or an error that happens to fall entirely in the untouched middle of a
+  huge file won't be seen. This is a deliberate trade-off (bounded memory
+  and near-instant reads via seeking, instead of loading the whole file)
+  that matters once a file is far larger than any reasonable token budget
+  could use anyway; raise `--max-input-bytes` if you need to see more of a
+  specific large file.
 
 ## Contributing
 

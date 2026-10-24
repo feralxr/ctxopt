@@ -218,8 +218,9 @@ def _estimate(tier: str, config: RouterConfig, input_tokens: int, output_tokens:
     econ = config.economics.get(tier)
     if econ is None:
         return None, None
-    cost = (input_tokens / 1_000_000) * econ.input_cost_per_mtok + (output_tokens / 1_000_000) * econ.output_cost_per_mtok
-    return cost, econ.avg_latency_ms
+    input_cost = (input_tokens / 1_000_000) * econ.input_cost_per_mtok
+    output_cost = (output_tokens / 1_000_000) * econ.output_cost_per_mtok
+    return input_cost + output_cost, econ.avg_latency_ms
 
 
 def _apply_budget_constraint(
@@ -312,11 +313,12 @@ def escalate(decision: RouteDecision, config: RouterConfig | None = None) -> Rou
     new_tier = order[idx + 1]
     model = config.tiers.get(new_tier, decision.model)
     cost, latency = _estimate(new_tier, config, decision.estimated_input_tokens, decision.estimated_output_tokens)
+    escalation_note = f"escalated from '{decision.tier}': response looked like a refusal or was too shallow"
     return RouteDecision(
         score=decision.score,
         tier=new_tier,
         model=model,
-        reasons=decision.reasons + [f"escalated from '{decision.tier}': response looked like a refusal or was too shallow"],
+        reasons=[*decision.reasons, escalation_note],
         estimated_input_tokens=decision.estimated_input_tokens,
         estimated_output_tokens=decision.estimated_output_tokens,
         estimated_cost_usd=cost,

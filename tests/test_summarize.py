@@ -1,6 +1,5 @@
 from ctxopt.summarize import summarize_text
 
-
 # ---- basic behavior ---------------------------------------------------------
 
 

@@ -35,6 +35,7 @@ import json
 import re
 from dataclasses import dataclass
 
+from .safety import compile_safe_pattern
 from .tokens import count_tokens
 
 _TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?")
@@ -95,16 +96,16 @@ def detect_profile(text: str) -> str:
     lines = stripped.splitlines()
     sample = lines[:60]
 
-    diff_markers = sum(1 for l in sample if l.startswith(("+++ ", "--- ", "@@ ", "diff --git ")))
+    diff_markers = sum(1 for line in sample if line.startswith(("+++ ", "--- ", "@@ ", "diff --git ")))
     if diff_markers >= 2:
         return "diff"
 
     frame_markers = sum(
         1
-        for l in sample
-        if re.search(r"^\s*at .+\(.*\)\s*$", l)
-        or re.search(r'File "[^"]+", line \d+', l)
-        or l.strip().lower().startswith("traceback (most recent call last)")
+        for line in sample
+        if re.search(r"^\s*at .+\(.*\)\s*$", line)
+        or re.search(r'File "[^"]+", line \d+', line)
+        or line.strip().lower().startswith("traceback (most recent call last)")
     )
     if frame_markers >= 3:
         return "stacktrace"
@@ -169,7 +170,7 @@ def _elide_middle(
         marker += f", {len(kept)} matching line(s) preserved below"
     marker += "] ..."
 
-    return head + [marker] + kept + tail, elided_count
+    return [*head, marker, *kept, *tail], elided_count
 
 
 def _fit_to_budget(
@@ -217,7 +218,7 @@ def _truncate_json_value(value, max_items: int, max_string_len: int, depth: int 
         if len(items) > max_items:
             half = max(1, max_items // 2)
             omitted = len(items) - 2 * half
-            return items[:half] + [f"... [{omitted} items omitted] ..."] + items[-half:]
+            return [*items[:half], f"... [{omitted} items omitted] ...", *items[-half:]]
         return items
     if isinstance(value, dict):
         return {k: _truncate_json_value(v, max_items, max_string_len, depth + 1, max_depth) for k, v in value.items()}
@@ -283,8 +284,13 @@ def sandbox_text(
     effective_head = head_lines if head_lines is not None else preset["head_lines"]
     effective_tail = tail_lines if tail_lines is not None else preset["tail_lines"]
 
-    all_patterns = list(_DEFAULT_KEEP_PATTERNS) + list(preset["extra_keep_patterns"]) + list(keep_patterns or [])
-    keep_regexes = [re.compile(p, re.IGNORECASE) for p in all_patterns]
+    # Patterns ctxopt authors itself (defaults, profile presets) are trusted
+    # and compiled directly; user-supplied keep_patterns go through the
+    # ReDoS guard, since they're the one place arbitrary external regex
+    # reaches this code.
+    trusted_patterns = list(_DEFAULT_KEEP_PATTERNS) + list(preset["extra_keep_patterns"])
+    keep_regexes = [re.compile(p, re.IGNORECASE) for p in trusted_patterns]
+    keep_regexes += [compile_safe_pattern(p, flags=re.IGNORECASE) for p in (keep_patterns or [])]
 
     lines = text.splitlines()
     if collapse_repeats:

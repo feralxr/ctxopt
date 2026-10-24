@@ -1,6 +1,6 @@
 [project]
 name = "ctxopt"
-version = "0.4.0"
+version = "0.5.0"
 description = "A lightweight CLI for taming LLM context windows: sandbox noisy tool output, summarize long conversations, and route prompts to the right model tier."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "ruff>=0.17", "mypy>=1.10"]
 
 [project.scripts]
 ctxopt = "ctxopt.cli:main"
@@ -46,3 +46,28 @@ packages = ["src/ctxopt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py39"  # matches requires-python; don't suggest 3.10+-only syntax like `X | None`
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
+ignore = [
+    "B008",  # function-call-in-default-argument: this is how Typer/Click are meant to be used
+    "UP045",  # `X | None` instead of `Optional[X]`: Typer resolves annotations at runtime via
+              # typing.get_type_hints(), and `X | None` as a runtime-evaluated expression requires
+              # Python 3.10+ (PEP 604) even with `from __future__ import annotations` -- applying
+              # this "fix" would break the CLI on Python 3.9, which this project still supports.
+]
+
+[tool.mypy]
+# mypy itself only checks against 3.10+ targets; the package's actual minimum
+# supported runtime (3.9, see requires-python above) is enforced by ruff's
+# target-version and by running the test suite on 3.9 in CI, not by this.
+python_version = "3.10"
+files = ["src/ctxopt"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
